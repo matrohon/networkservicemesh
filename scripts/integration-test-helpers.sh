@@ -21,7 +21,6 @@
 # Default timeout of 60 seconds can be overwritten in $2 parameter.
 #
 function wait_for_networkservice() {
-    set +xe
     end=$(date +%s)
     if [ "x$2" != "x" ]; then
      end=$((end + "$2"))
@@ -37,12 +36,10 @@ function wait_for_networkservice() {
         now=$(date +%s)
         if [ "$now" -gt "$end" ] ; then
             echo "NetworkService has not been created within 60 seconds, failing..."
-            set -xe
             return 1
         fi
     done
 
-    set -xe
     return 0
 }
 
@@ -51,7 +48,6 @@ function wait_for_networkservice() {
 # Default timeout of 180 seconds can be overwritten in $2 parameter.
 #
 function wait_for_pods() {
-    set +xe
     end=$(date +%s)
     if [ "x$2" != "x" ]; then
      end=$((end + "$2"))
@@ -77,12 +73,10 @@ function wait_for_pods() {
         now=$(date +%s)
         if [ "$now" -gt "$end" ] ; then
             echo "Containers failed to start."
-            set -xe
             return 1
         fi
     done
 
-    set -xe
     return 0
 }
 
@@ -90,18 +84,17 @@ function wait_for_pods() {
 # Dump logs for evidence for futher debugging
 #
 function dump_logs() {
-    set -xe
     kubectl describe node || true
     kubectl get pods --all-namespaces || true
     nsm=$(kubectl get pods --all-namespaces | grep networkservice | awk '{print $2}')
     namespace=$(kubectl get pods --all-namespaces | grep networkservice | awk '{print $1}')
-    if [[ "x$nsm" != "x" ]]; then 
+    if [[ "x$nsm" != "x" ]]; then
         kubectl describe pod "$nsm" -n "$namespace" || true
         kubectl logs "$nsm" -n "$namespace" || true
         kubectl logs "$nsm" -n "$namespace" -p || true
     fi
     nsm_client=$(kubectl get pods --all-namespaces | grep nsm-client | awk '{print $2}')
-    if [[ "x$nsm_client" != "x" ]]; then 
+    if [[ "x$nsm_client" != "x" ]]; then
         kubectl describe pod "$nsm_client" -n "$namespace" || true
         kubectl logs "$nsm_client" -n "$namespace" nsm-init || true
         kubectl logs "$nsm_client" -n "$namespace" nsm-client || true
@@ -109,17 +102,17 @@ function dump_logs() {
         kubectl logs "$nsm_client" -n "$namespace" nsm-client -p || true
     fi
     nse=$(kubectl get pods --all-namespaces | grep nse | awk '{print $2}')
-    if [[ "x$nse" != "x" ]]; then 
+    if [[ "x$nse" != "x" ]]; then
         kubectl describe pod "$nse" -n "$namespace" || true
         kubectl logs "$nse" -n "$namespace"  || true
         kubectl logs "$nse" -n "$namespace"  -p || true
-    fi    
+    fi
     dataplane=$(kubectl get pods --all-namespaces | grep test-dataplane | awk '{print $2}')
-    if [[ "x$dataplane" != "x" ]]; then 
+    if [[ "x$dataplane" != "x" ]]; then
         kubectl describe pod "$dataplane" -n "$namespace" || true
         kubectl logs "$dataplane" -n "$namespace"  || true
         kubectl logs "$dataplane" -n "$namespace"  -p || true
-    fi 
+    fi
     sidecar=$(kubectl get pods --all-namespaces | grep sidecar-injector-webhook | awk '{print $2}')
     if [[ "x$sidecar" != "x" ]]; then
         kubectl describe pod "$sidecar" -n "$namespace" || true
@@ -142,7 +135,138 @@ function dump_logs() {
     if sudo docker images; then
         exit 0
     fi
-    set +xe
 }
 
+function deploy_nsm() {
+    kubectl label --overwrite --all=true nodes app=networkservice-node
+    #kubectl label --overwrite nodes kube-node-1 app=networkservice-node
+    kubectl create -f conf/sample/networkservice-daemonset.yaml
+    #
+    # Now let's wait for all pods to get into running state
+    #
+    wait_for_pods default
+    exit_code=$?
+    [[ ${exit_code} != 0 ]] && return ${exit_code}
+
+
+    # Wait til settles
+    echo "INFO: Waiting for Network Service Mesh daemonset to be up and CRDs to be available ..."
+    typeset -i cnt=240
+    until kubectl get crd | grep networkserviceendpoints.networkservicemesh.io ; do
+        ((cnt=cnt-1)) || return 1
+        sleep 2
+    done
+    typeset -i cnt=240
+    until kubectl get crd | grep networkservices.networkservicemesh.io ; do
+        ((cnt=cnt-1)) || return 1
+        sleep 2
+    done
+
+    #
+    # Since daemonset is up and running, create CRD resources
+    #
+    kubectl create -f conf/sample/networkservice.yaml
+    wait_for_networkservice default
+
+    #
+    # Starting nse pod which will advertise an endpoint for gold-network
+    # network service
+    kubectl create -f conf/sample/nse.yaml
+    kubectl create -f conf/sample/test-dataplane.yaml
+    wait_for_pods default
+
+    #
+    # Starting nsm client pod, nsm-client pod should discover gold-network
+    # network service along with its endpoint and interface
+    kubectl create -f conf/sample/nsm-client.yaml
+
+    #
+    # Now let's wait for nsm-cient pod to get into running state
+    #
+    wait_for_pods default
+
+    #
+    # Starting vpp-daemonset pod
+    kubectl create -f dataplanes/vpp/yaml/vpp-daemonset.yaml
+
+    #
+    # Now let's wait for vpp-daemonset pod to get into running state
+    #
+    wait_for_pods default
+    exit_ret=$?
+    if [ "${exit_ret}" != "0" ] ; then
+        return "${exit_ret}"
+    fi
+
+    #
+    # tests are failing on minikube for adding sidecar containers,  will enable
+    # tests once we move the testing to actual Kubernetes cluster.
+    ## Refer https://github.com/kubernetes/website/issues/3956#issuecomment-407895766
+
+    # # Side car tests
+    # kubectl create -f conf/sidecar-injector/sample-deployment.yaml
+    # wait_for_pods default
+    # exit_ret=$?
+    # if [ "${exit_ret}" != "0" ] ; then
+    #     return "${exit_ret}"
+    # fi
+
+    # ## Sample test scripts for adding sidecar components in a Kubernetes cluster
+    # SIDECAR_CONFIG=conf/sidecar-injector
+
+    # ## Create SSL certificates
+    # $SIDECAR_CONFIG/webhook-create-signed-cert.sh --service sidecar-injector-webhook-svc --secret sidecar-injector-webhook-certs --namespace default
+
+    # ## Copy the cert to the webhook configuration YAML file
+    # < $SIDECAR_CONFIG/mutatingWebhookConfiguration.yaml $SIDECAR_CONFIG/webhook-patch-ca-bundle.sh >  $SIDECAR_CONFIG/mutatingwebhook-ca-bundle.yaml
+
+    # kubectl label namespace default sidecar-injector=enabled
+    # ## Create all the required components
+    # kubectl create -f $SIDECAR_CONFIG/configMap.yaml -f $SIDECAR_CONFIG/ServiceAccount.yaml -f $SIDECAR_CONFIG/server-deployment.yaml -f $SIDECAR_CONFIG/mutatingwebhook-ca-bundle.yaml -f $SIDECAR_CONFIG/sidecarInjectorService.yaml
+    # wait_for_pods default
+    # exit_ret=$?
+    # if [ "${exit_ret}" != "0" ] ; then
+    #     return "${exit_ret}"
+    # fi
+
+    # kubectl delete "$(kubectl get pods -o name | grep sleep)"
+    # wait_for_pods default
+    # exit_ret=$?
+    # if [ "${exit_ret}" != "0" ] ; then
+    #     error_collection
+    #     return "${exit_ret}"
+    # fi
+
+    # pod_count=$(kubectl get pods | grep sleep | grep Running | awk '{print $2}')
+    # if [ "${pod_count}" != "2/2" ]; then
+    #     error_collection
+    #     return 1
+    # fi
+
+    # kubectl describe pod "$(kubectl get pods | grep sleep | grep Running | awk '{print $1}')" | grep status=injected
+    # exit_ret=$?
+    # if [ "${exit_ret}" != "0" ] ; then
+    #     error_collection
+    #     return "${exit_ret}"
+    # fi
+
+}
+
+function undeploy_nsm() {
+    kubectl delete -f dataplanes/vpp/yaml/vpp-daemonset.yaml
+
+    # remove endpoint and client finalizers to ensure pod's deletion can terminate
+    NSMC=$(k get pods | grep nsm-client | awk '{print $1}')
+    NSE=$(k get pods | grep nse | awk '{print $1}')
+
+    kubectl patch pod $NSMC -p '{"metadata":{"finalizers":null}}'
+    kubectl delete -f conf/sample/nsm-client.yaml
+
+    kubectl patch pod $NSE -p '{"metadata":{"finalizers":null}}'
+    kubectl delete -f conf/sample/nse.yaml
+
+    kubectl delete -f conf/sample/test-dataplane.yaml
+    kubectl delete -f conf/sample/networkservice.yaml
+    kubectl delete -f conf/sample/networkservice-daemonset.yaml
+}
 # vim: sw=4 ts=4 et si
