@@ -30,6 +30,18 @@ import (
 )
 
 func main() {
+	var nsmServerSocket string
+	if e, _ := os.LookupEnv(nsmd.NsmDevicePluginEnv); e == "false" {
+		logrus.Info("Creating Workspace")
+		reply, err := nsmd.RequestWorkspace()
+		if err != nil {
+			logrus.Error("Unable to create nsmd workspace")
+		}
+		logrus.Infof("RequestWorkspace reply: %s", reply)
+		nsmServerSocket = reply.HostBasedir + reply.Workspace + "/" + reply.NsmServerSocket
+	} else {
+		nsmServerSocket, _ = os.LookupEnv(nsmd.NsmServerSocketEnv)
+	}
 	// For NSC to program container's dataplane, container's linux namespace must be sent to NSM
 	netns, err := tools.GetCurrentNS()
 	if err != nil {
@@ -37,7 +49,6 @@ func main() {
 	}
 	logrus.Infof("Starting NSC, linux namespace: %s...", netns)
 
-	nsmServerSocket, _ := os.LookupEnv(nsmd.NsmServerSocketEnv)
 	// TODO handle case where env variable is not set
 
 	logrus.Infof("Connecting to nsm server on socket: %s...", nsmServerSocket)

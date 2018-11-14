@@ -3,6 +3,7 @@ package nsmd
 import (
 	"fmt"
 	"math/rand"
+	"os"
 	"strings"
 	"time"
 
@@ -35,7 +36,7 @@ func NewNetworkServiceServer(model model.Model, workspace *Workspace) networkser
 }
 
 func (srv *networkServiceServer) Request(ctx context.Context, request *networkservice.NetworkServiceRequest) (*networkservice.Connection, error) {
-	logrus.Infof("Received request from client to connect to NetworkService: %#v", request)
+	logrus.Infof("Received request from client to connect to NetworkService: %#v", request.Connection.NetworkService)
 	err := ValidateNetworkServiceRequest(request)
 	if err != nil {
 		logrus.Error(err)
@@ -57,7 +58,7 @@ func (srv *networkServiceServer) Request(ctx context.Context, request *networkse
 	endpoints := srv.model.GetNetworkServiceEndpoints(netsvc)
 
 	if len(endpoints) == 0 {
-		return nil, errors.New(fmt.Sprintf("netwwork service '%s' not found", request.Connection.NetworkService))
+		return nil, errors.New(fmt.Sprintf("network service '%s' not found", request.Connection.NetworkService))
 	}
 
 	idx := rand.Intn(len(endpoints))
@@ -66,25 +67,6 @@ func (srv *networkServiceServer) Request(ctx context.Context, request *networkse
 		return nil, errors.New("should not see this error, scaffolding called")
 	}
 
-	// get dataplane
-	dp, err := srv.model.SelectDataplane()
-	if err != nil {
-		return nil, err
-	}
-
-	logrus.Infof("Preparing to program dataplane: %v...", dp)
-
-	dataplaneConn, err := tools.SocketOperationCheck(dp.SocketLocation)
-	if err != nil {
-		return nil, err
-	}
-	defer dataplaneConn.Close()
-	dataplaneClient := dataplaneapi.NewDataplaneOperationsClient(dataplaneConn)
-
-	dpCtx, dpCancel := context.WithTimeout(context.Background(), nseConnectionTimeout)
-	defer dpCancel()
-
-	var dpApiConnection *dataplaneapi.Connection
 	// If NSE is local, build parameters
 	if srv.model.GetNsmUrl() == endpoint.Labels[KEY_NSM_URL] {
 		workspace := WorkSpaceRegistry().WorkspaceByEndpoint(endpoint)
@@ -125,31 +107,53 @@ func (srv *networkServiceServer) Request(ctx context.Context, request *networkse
 			return nil, e
 		}
 
-		dpApiConnection = &dataplaneapi.Connection{
-			ConnectionContext: nseConnection.GetConnectionContext(),
-			ConnectionId:      connectionID,
-			LocalSource:       nscConnection.GetLocalMechanism(),
-			Destination: &dataplaneapi.Connection_Local{
-				Local: nseConnection.GetLocalMechanism(),
-			},
+		if f := os.Getenv("FAKE_DATAPLANE"); len(f) == 0 {
+			logrus.Info("running with dataplane")
+			// get dataplane
+			dp, err := srv.model.SelectDataplane()
+			if err != nil {
+				return nil, err
+			}
+
+			logrus.Infof("Preparing to program dataplane: %v...", dp)
+
+			dataplaneConn, err := tools.SocketOperationCheck(dp.SocketLocation)
+			if err != nil {
+				return nil, err
+			}
+			defer dataplaneConn.Close()
+			dataplaneClient := dataplaneapi.NewDataplaneOperationsClient(dataplaneConn)
+
+			dpCtx, dpCancel := context.WithTimeout(context.Background(), nseConnectionTimeout)
+			defer dpCancel()
+
+			var dpApiConnection *dataplaneapi.Connection
+			dpApiConnection = &dataplaneapi.Connection{
+				ConnectionContext: nseConnection.GetConnectionContext(),
+				ConnectionId:      connectionID,
+				LocalSource:       nscConnection.GetLocalMechanism(),
+				Destination: &dataplaneapi.Connection_Local{
+					Local: nseConnection.GetLocalMechanism(),
+				},
+			}
+			logrus.Infof("Sending request to dataplane: %#v", dpApiConnection)
+			_, err = dataplaneClient.ConnectRequest(dpCtx, dpApiConnection)
+			if err != nil {
+				logrus.Errorf("Dataplane request failed: %s", err)
+				return nil, err
+			}
 		}
+		return &networkservice.Connection{
+			ConnectionId:      connectionID,
+			NetworkService:    netsvc,
+			LocalMechanism:    request.LocalMechanismPreference[0],
+			ConnectionContext: nseConnection.GetConnectionContext(),
+			Labels:            nil,
+		}, nil
 	} else {
 		// TODO connection is remote, send to nsm
 	}
-	logrus.Infof("Sending request to dataplane: %#v", dpApiConnection)
-	_, err = dataplaneClient.ConnectRequest(dpCtx, dpApiConnection)
-	if err != nil {
-		logrus.Errorf("Dataplane request failed: %s", err)
-		return nil, err
-	}
-
-	return &networkservice.Connection{
-		ConnectionId:      connectionID,
-		NetworkService:    netsvc,
-		LocalMechanism:    request.LocalMechanismPreference[0],
-		ConnectionContext: dpApiConnection.ConnectionContext,
-		Labels:            nil,
-	}, nil
+	return nil, nil
 }
 
 func (srv *networkServiceServer) Close(context.Context, *networkservice.Connection) (*networkservice.Connection, error) {

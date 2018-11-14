@@ -39,6 +39,7 @@ func NewRegistryServer(model model.Model, workspace *Workspace) registry.Network
 func (es *registryServer) RegisterNSE(ctx context.Context, request *registry.NetworkServiceEndpoint) (*registry.NetworkServiceEndpoint, error) {
 	logrus.Infof("Received RegisterNSE request: %v", request)
 
+	var endpoint *registry.NetworkServiceEndpoint
 	// Check if there is already Network Service Endpoint object with the same name, if there is
 	// success will be returned to NSE, since it is a case of NSE pod coming back up.
 	client, err := RegistryClient()
@@ -47,22 +48,25 @@ func (es *registryServer) RegisterNSE(ctx context.Context, request *registry.Net
 		logrus.Error(err)
 		return nil, err
 	}
-	if client == nil {
-		//TODO: manage this case with a specific error code returned by RegistryClient()
-		logrus.Info("No registry URL defined, NSE will only be registered on this nsm server")
-		return request, nil
-	}
+
 	// TODO fix url setting here
 	if request.Labels == nil {
 		request.Labels = make(map[string]string)
 	}
+
 	request.Labels[KEY_NSM_URL] = es.model.GetNsmUrl()
 
-	endpoint, err := client.RegisterNSE(context.Background(), request)
-	if err != nil {
-		err = fmt.Errorf("attempt to pass through from nsm to upstream registry failed with: %v", err)
-		logrus.Error(err)
-		return nil, err
+	if client == nil {
+		//TODO: manage this case with a specific error code returned by RegistryClient()
+		logrus.Info("No registry URL defined, NSE will only be registered on this nsm server")
+		endpoint = request
+	} else {
+		endpoint, err = client.RegisterNSE(context.Background(), request)
+		if err != nil {
+			err = fmt.Errorf("attempt to pass through from nsm to upstream registry failed with: %v", err)
+			logrus.Error(err)
+			return nil, err
+		}
 	}
 
 	ep := es.model.GetEndpoint(endpoint.EndpointName)
