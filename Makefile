@@ -23,6 +23,8 @@ default: all
 include .nsm.mk
 # Pull in k8s targets
 include .k8s.mk
+# Pull in Standalone targets
+include .standalone.mk
 
 GOPATH?=$(shell go env GOPATH)
 GOCMD=go

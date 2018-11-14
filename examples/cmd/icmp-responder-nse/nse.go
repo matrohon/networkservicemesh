@@ -38,14 +38,27 @@ const (
 
 func main() {
 	var wg sync.WaitGroup
+	var nsmServerSocket, nsmClientSocket string
 
-	nsmServerSocket, _ := os.LookupEnv(nsmd.NsmServerSocketEnv)
-	logrus.Infof("nsmServerSocket: %s", nsmServerSocket)
-	// TODO handle missing env
+	if e, _ := os.LookupEnv(nsmd.NsmDevicePluginEnv); e == "false" {
+		logrus.Info("Creating Workspace")
+		reply, err := nsmd.RequestWorkspace()
+		if err != nil {
+			logrus.Error("Unable to create nsmd workspace")
+		}
+		logrus.Infof("RequestWorkspace reply: %s", reply)
+		nsmServerSocket = reply.HostBasedir + reply.Workspace + "/" + reply.NsmServerSocket
+		nsmClientSocket = reply.HostBasedir + reply.Workspace + "/" + reply.NsmClientSocket
+	} else {
+		logrus.Infof("Device Plugin context, workspace created")
+		nsmServerSocket, _ := os.LookupEnv(nsmd.NsmServerSocketEnv)
+		logrus.Infof("nsmServerSocket: %s", nsmServerSocket)
+		// TODO handle missing env
 
-	nsmClientSocket, _ := os.LookupEnv(nsmd.NsmClientSocketEnv)
-	logrus.Infof("nsmClientSocket: %s", nsmClientSocket)
-	// TODO handle missing env
+		nsmClientSocket, _ := os.LookupEnv(nsmd.NsmClientSocketEnv)
+		logrus.Infof("nsmClientSocket: %s", nsmClientSocket)
+		// TODO handle missing env
+	}
 
 	// For NSE to program container's dataplane, container's linux namespace must be sent to NSM
 	linuxNS, err := tools.GetCurrentNS()

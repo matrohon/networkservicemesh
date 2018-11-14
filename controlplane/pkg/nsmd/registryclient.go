@@ -32,13 +32,13 @@ var stopRedial = true
 
 func RegistryClient() (registry.NetworkServiceRegistryClient, error) {
 	var err error
+	// TODO doing registry Address here is ugly
+	registryAddress := os.Getenv("NSM_REGISTRY_ADDRESS")
+	registryAddress = strings.TrimSpace(registryAddress)
+	if registryAddress == "" {
+		return nil, nil
+	}
 	once.Do(func() {
-		// TODO doing registry Address here is ugly
-		registryAddress := os.Getenv("NSM_REGISTRY_ADDRESS")
-		registryAddress = strings.TrimSpace(registryAddress)
-		if registryAddress == "" {
-			registryAddress = "localhost:5000"
-		}
 		for stopRedial {
 			conn, err := grpc.Dial(registryAddress, grpc.WithInsecure())
 			if err != nil {

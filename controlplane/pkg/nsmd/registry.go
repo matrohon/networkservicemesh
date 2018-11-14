@@ -47,6 +47,11 @@ func (es *registryServer) RegisterNSE(ctx context.Context, request *registry.Net
 		logrus.Error(err)
 		return nil, err
 	}
+	if client == nil {
+		//TODO: manage this case with a specific error code returned by RegistryClient()
+		logrus.Info("No registry URL defined, NSE will only be registered on this nsm server")
+		return request, nil
+	}
 	// TODO fix url setting here
 	if request.Labels == nil {
 		request.Labels = make(map[string]string)
