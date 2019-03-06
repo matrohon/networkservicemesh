@@ -61,6 +61,20 @@ data:
         default_filter: "nsm-filter"
         default_highlight: "nsm-edges"
 ---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: skydive-agent-config-file
+data:
+  skydive.yml: |
+    agent:
+      topology:
+        probes:
+          - vpp
+          - docker
+    logging:
+      level: DEBUG
+---
 apiVersion: extensions/v1beta1
 kind: Deployment
 metadata:
@@ -132,6 +146,11 @@ spec:
               mountPath: /var/run/docker.sock
             - name: run
               mountPath: /host/run
+            - name: shm
+              mountPath: /dev/shm
+            - mountPath: /etc/skydive.yml
+              subPath: skydive.yml
+              name: skydive-agent-config-file
       volumes:
         - name: docker
           hostPath:
@@ -139,3 +158,10 @@ spec:
         - name: run
           hostPath:
             path: /var/run/netns
+        - name: shm
+          hostPath:
+            path: /dev/shm
+        - name: skydive-agent-config-file
+          configMap:
+            name: skydive-agent-config-file
+
