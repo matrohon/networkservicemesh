@@ -62,6 +62,7 @@ func (c *NetworkServiceEndpointCache) Start(informerFactory externalversions.Sha
 
 func (c *NetworkServiceEndpointCache) resourceAdded(obj interface{}) {
 	nse := obj.(*v1.NetworkServiceEndpoint)
+	logrus.Infof("NetworkServiceEndpointCache.Added(%v)", nse)
 	endpoints := c.nseByNs[nse.Spec.NetworkServiceName]
 	if _, exist := c.networkServiceEndpoints[getNseKey(nse)]; !exist {
 		c.nseByNs[nse.Spec.NetworkServiceName] = append(endpoints, nse)

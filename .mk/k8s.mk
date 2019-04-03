@@ -209,7 +209,7 @@ k8s-secure-intranet-connectivity-save:
 
 .PHONY: k8s-secure-intranet-connectivity-load-images
 
-k8s-secure-intranet-connectivity-load-images: 
+k8s-secure-intranet-connectivity-load-images:
 
 
 .PHONY: k8s-skydive-build
@@ -263,6 +263,12 @@ k8s-vppagent-firewall-nse-build:  ${CONTAINER_BUILD_PREFIX}-vppagent-firewall-ns
 
 .PHONY: k8s-vppagent-firewall-nse-save
 k8s-vppagent-firewall-nse-save:  ${CONTAINER_BUILD_PREFIX}-vppagent-firewall-nse-save
+
+.PHONY: k8s-no-vppagent-firewall-nse-build
+k8s-no-vppagent-firewall-nse-build:  ${CONTAINER_BUILD_PREFIX}-no-vppagent-firewall-nse-build
+
+.PHONY: k8s-no-vppagent-firewall-nse-save
+k8s-no-vppagent-firewall-nse-save:  ${CONTAINER_BUILD_PREFIX}-no-vppagent-firewall-nse-save
 
 .PHONY: k8s-vppagent-nsc-build
 k8s-vppagent-nsc-build:  ${CONTAINER_BUILD_PREFIX}-vppagent-nsc-build

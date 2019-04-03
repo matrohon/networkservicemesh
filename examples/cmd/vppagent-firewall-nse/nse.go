@@ -61,10 +61,12 @@ func main() {
 		syscall.SIGHUP,
 		syscall.SIGINT,
 		syscall.SIGTERM,
-		syscall.SIGQUIT)
+		syscall.SIGQUIT,
+		syscall.SIGKILL)
 	go func() {
 		<-c
 		wg.Done()
 	}()
 	wg.Wait()
+	logrus.Info("Exiting")
 }

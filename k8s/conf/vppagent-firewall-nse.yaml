@@ -14,8 +14,11 @@ spec:
         networkservicemesh.io/impl: "secure-intranet-connectivity"
     spec:
       containers:
-        - name: firewall-nse
+        - name: vppagent
           image: networkservicemesh/vppagent-firewall-nse:latest
+          imagePullPolicy: IfNotPresent
+        - name: firewall-nse
+          image: networkservicemesh/no-vppagent-firewall-nse:latest
           imagePullPolicy: IfNotPresent
           env:
             - name: ADVERTISE_NSE_NAME
