@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/networkservicemesh/networkservicemesh/pkg/tools"
 
@@ -23,12 +24,18 @@ import (
 	"k8s.io/client-go/util/homedir"
 )
 
+const (
+	connectRetries = 10
+	connectSleep   = 5 * time.Second
+)
+
 // Dict to map nsm URL to grpc connection
 var managers = map[string]*grpc.ClientConn{}
 var stopInformer func()
 
 func deleteManager(manager string) {
 	conn, ok := managers[manager]
+	logrus.Infof("Removing manager %s with connection status %s", manager, conn.GetState())
 	if !ok {
 		logrus.Warningf("Error: no connection to manager %s", manager)
 		return
@@ -39,6 +46,7 @@ func deleteManager(manager string) {
 
 func monitorCrossConnects(manager string) {
 	var err error
+	var stream crossconnect.MonitorCrossConnect_MonitorCrossConnectsClient
 	logrus.Infof("Starting CrossConnections Monitor on %s", manager)
 
 	conn, ok := managers[manager]
@@ -50,7 +58,7 @@ func monitorCrossConnects(manager string) {
 	nsmClient := crossconnect.NewMonitorCrossConnectClient(conn)
 
 	// Looping indefinetly or until grpc returns an error indicating the other end closed connection.
-	stream, err := nsmClient.MonitorCrossConnects(context.Background(), &empty.Empty{})
+	stream, err = nsmClient.MonitorCrossConnects(context.Background(), &empty.Empty{})
 
 	if err != nil {
 		logrus.Warningf("Error: %+v.", err)
@@ -60,8 +68,24 @@ func monitorCrossConnects(manager string) {
 	for {
 		event, err := stream.Recv()
 		if err != nil {
-			logrus.Errorf("Error: %+v.", err)
-			return
+			for iteration := connectRetries; true; <-time.After(connectSleep) {
+
+				stream, err = nsmClient.MonitorCrossConnects(context.Background(), &empty.Empty{})
+				if err != nil {
+
+					logrus.Errorf("Error trying to recreate the stream: %+v.", err)
+					iteration--
+					if iteration > 0 {
+						continue
+					} else {
+						logrus.Errorf("Error: %+v.", err)
+						return
+					}
+				}
+				logrus.Info("Stream recreated")
+				break
+			}
+			continue
 		}
 		data := fmt.Sprintf("\u001b[31m*** %s\n\u001b[0m", event.Type)
 		data += fmt.Sprintf("\u001b[31m*** %s\n\u001b[0m", conn.Target())
